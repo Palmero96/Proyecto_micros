@@ -43,12 +43,21 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include <../Inc/PID.h>
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
-
+struct PID{
+  float Kp;
+  float Ki;
+  float Kd;
+  float OUTPUT;
+  float error;
+  float error_prev;
+  int low_limit;
+  int high_limit;
+};
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -76,22 +85,11 @@ int REF_VAL_DEF;
 
 int FDC_TOP, FDC_BOT;
 
-//********************Definicion de los PID a utilizar************************/
-struct pid_controller ctrldata_motor;
-pid_t pid_motor;
+float error_signal;
 
-float PWM_motor;
-float setpoint_motor = 0;
-
-float kp_motor = 2.5, ki_motor = 1, kd_motor = 1;
-
-struct pid_controller ctrldata_led;
-pid_t pid_led;
-
-float PWM_led;
-float setpoint_led = 0;
-
-float kp_led = 2.5, ki_led = 1, kd_led = 1;
+//***********************Valores de las salidas de los PWM********************/
+int PWM_motor;
+int PWM_led;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -127,6 +125,18 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
   else if (GPIO_Pin == GPIO_PIN_4){
     FDC_BOT = 1;
   }
+}
+
+/****************************************************************************/
+/******************FUNCION PARA EL USO DE LOS PIDS***************************/
+/****************************************************************************/
+void pid_compute(struct PID* mypid, float error){
+  mypid->error_prev = mypid->error;
+  mypid->error = error;
+  mypid->OUTPUT = mypid->Kp*mypid->error + mypid->Ki*(mypid->error_prev+
+    mypid->error)/2 + mypid->Kd*(mypid->error-mypid->error_prev);
+  if (mypid->OUTPUT > mypid->high_limit) mypid->OUTPUT = mypid->high_limit;
+  if (mypid->OUTPUT < mypid->low_limit) mypid->OUTPUT = mypid->low_limit;
 }
 /* USER CODE END 0 */
 
@@ -164,18 +174,26 @@ int main(void)
   MX_TIM1_Init();
   /* USER CODE BEGIN 2 */
   /**************************************************************************/
-  /*****************Creación de los PID para usarlos en el loop**************/
+  /***********Inicialización de los PID para usarlos en el loop**************/
   /**************************************************************************/
-  pid_motor = pid_create(&ctrldata_motor, &LDR_USE, &PWM_motor, &setpoint_motor,
-    kp_motor, ki_motor, kd_motor);
-  pid_limits(pid_motor, -255, 255);
-  pid_auto(pid_motor);
+  struct PID pid_motor;
+  pid_motor.Kp = 2.5;
+  pid_motor.Ki = 1;
+  pid_motor.Kd = 1;
+  pid_motor.low_limit = -255;
+  pid_motor.low_limit = 255;
 
-  pid_led = pid_create(&ctrldata_led, &LDR_USE, &PWM_led, &setpoint_led,
-    kp_led, ki_led, kd_led);
-  pid_limits(pid_led, 0, 255);
-  pid_auto(pid_led);
+  struct PID pid_led;
+  pid_led.Kp = 2.5;
+  pid_led.Ki = 1;
+  pid_led.Kd = 1;
+  pid_led.low_limit = 0;
+  pid_led.high_limit = 255;
 
+  pid_motor.error = 0;
+  pid_motor.error_prev = 0;
+  pid_led.error = 0;
+  pid_led.error_prev = 0;
   /**************************************************************************/
   /*******************Inicializacion de los timers de los PWM****************/
   /**************************************************************************/
@@ -228,49 +246,49 @@ int main(void)
     /************************************************************************/
     /*******GESTION DE LOS PID PARA EL USO DEL MOTOR ASI COMO DE LOS LED*****/
     /************************************************************************/
+    error_signal = REF_VAL_DEF - LDR1;
+    pid_compute(&pid_motor, error_signal);
+    pid_compute(&pid_led, error_signal);
 
     /*******Se pretende priorizar el uso de la persiana ante el uso de los***/
     /*******LED; excepto en el caso en el que no haya suficiente luz en el***/
     /*******exterior, donde la persiana se bajará completamente**************/
-    if(PWM_motor >= 0){
+    if(pid_motor.OUTPUT >= 0){
       //Activa el controlador para que vaya en un sentido
     }
 
-    else if (PWM_motor <= 0){
+    else if (pid_motor.OUTPUT <= 0){
       //Activa el controlador para que vaya en el otro sentido
+      pid_motor.OUTPUT = -pid_motor.OUTPUT;
     }
 
     if (LDR2 < LUX_LOW_LIMIT){
-      //El PWM_motor se fija en una velocidad constante para cerrar y el led
-      //sigue igual
-      if(pid_need_compute(pid_led)){
-        pid_compute(pid_led);
+      //Baja la persiana porque no es util
+      if(!FDC_BOT){
+        PWM_motor = -50;
       }
-      PWM_motor = -50;
-    }
-
-    else if (LDR2 >= LUX_LOW_LIMIT && FDC_TOP == 0){
-      //Prioriza la persiana sobre el LED
-      PWM_led = 0;
-      if(pid_need_compute(pid_motor)){
-        pid_compute(pid_motor);
-      }
-    }
-
-    else if (LDR2 >= LUX_LOW_LIMIT && FDC_TOP == 1){
-      //Uso del LED puesto que persiana está totalmente subida
-      if (LDR_USE < 0){
-        //Hay más luz fuera
-        if(pid_need_compute(pid_led)){
-          pid_compute(pid_led);
-        }
+      else if(FDC_BOT){
         PWM_motor = 0;
       }
-      else if (LDR_USE >= 0 && PWM_led == 0){
-        PWM_led = 0;
-        if(pid_need_compute(pid_motor)){
-          pid_compute(pid_motor);
-        }
+      PWM_led = pid_led.OUTPUT;
+    }
+
+    else if (LDR2 >= LUX_LOW_LIMIT && !FDC_TOP){
+      //Prioriza la persiana sobre el LED
+      PWM_led = 0;
+      PWM_motor = pid_motor.OUTPUT;
+    }
+
+    else if (LDR2 >= LUX_LOW_LIMIT && FDC_TOP){
+      //Uso del LED puesto que persiana está totalmente subida
+      if (error_signal < 0){
+        //Hay más luz de la deseada
+        PWM_led = pid_motor.OUTPUT;
+        PWM_motor = pid_motor.OUTPUT;
+      }
+      else if (error_signal > 0){
+        PWM_motor = 0;
+        PWM_led = pid_led.OUTPUT;
       }
     }
     /**********************************************************************/
@@ -280,6 +298,7 @@ int main(void)
     htim1.Instance->CCR2 = PWM_motor;
   /* USER CODE END 3 */
 }
+	}
 
 /**
   * @brief System Clock Configuration
