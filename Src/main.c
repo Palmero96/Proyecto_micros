@@ -43,7 +43,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include <../Inc/PID.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -54,6 +54,7 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 #define REF_VAL_0 150
+#define LUX_LOW_LIMIT 50
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -65,10 +66,32 @@
 ADC_HandleTypeDef hadc1;
 DMA_HandleTypeDef hdma_adc1;
 
+TIM_HandleTypeDef htim1;
+
 /* USER CODE BEGIN PV */
-uint8_t LDR1, LDR2;
+uint8_t LDR1, LDR2;       //LDR1 --> Interior, LDR2 --> Exterior
+float LDR_USE;
 int REF_VAL_TEMP;
 int REF_VAL_DEF;
+
+int FDC_TOP, FDC_BOT;
+
+//********************Definicion de los PID a utilizar************************/
+struct pid_controller ctrldata_motor;
+pid_t pid_motor;
+
+float PWM_motor;
+float setpoint_motor = 0;
+
+float kp_motor = 2.5, ki_motor = 1, kd_motor = 1;
+
+struct pid_controller ctrldata_led;
+pid_t pid_led;
+
+float PWM_led;
+float setpoint_led = 0;
+
+float kp_led = 2.5, ki_led = 1, kd_led = 1;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -76,24 +99,33 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_DMA_Init(void);
 static void MX_ADC1_Init(void);
+static void MX_TIM1_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-/******************************************************************************/
-/**************************MANEJO DE INTERRUPCIONES****************************/
-/******************************************************************************/
+/****************************************************************************/
+/**************************MANEJO DE INTERRUPCIONES**************************/
+/****************************************************************************/
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
-  if (GPIO_Pin == GPIO_PIN_1){
+  /***********************INTERRUPCIONES BOTONERA****************************/
+  if (GPIO_Pin == GPIO_PIN_0){
     REF_VAL_DEF = REF_VAL_TEMP;
   }
-  else if (GPIO_Pin == GPIO_PIN_2){
+  else if (GPIO_Pin == GPIO_PIN_1){
     REF_VAL_TEMP--;
   }
-  else if (GPIO_Pin == GPIO_PIN_3){
+  else if (GPIO_Pin == GPIO_PIN_2){
     REF_VAL_TEMP++;
+  }
+  /******************INTERRUPCIONES FINALES DE CARRERA***********************/
+  else if (GPIO_Pin == GPIO_PIN_3){
+    FDC_TOP = 1;
+  }
+  else if (GPIO_Pin == GPIO_PIN_4){
+    FDC_BOT = 1;
   }
 }
 /* USER CODE END 0 */
@@ -105,8 +137,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
 int main(void)
 {
   /* USER CODE BEGIN 1 */
-  REF_VAL_DEF = REF_VAL_0;
-  REF_VAL_TEMP = REF_VAL_0;
+
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -115,7 +146,8 @@ int main(void)
   HAL_Init();
 
   /* USER CODE BEGIN Init */
-
+  REF_VAL_DEF = REF_VAL_0;
+  REF_VAL_TEMP = REF_VAL_0;
   /* USER CODE END Init */
 
   /* Configure the system clock */
@@ -129,8 +161,26 @@ int main(void)
   MX_GPIO_Init();
   MX_DMA_Init();
   MX_ADC1_Init();
+  MX_TIM1_Init();
   /* USER CODE BEGIN 2 */
+  /**************************************************************************/
+  /*****************Creación de los PID para usarlos en el loop**************/
+  /**************************************************************************/
+  pid_motor = pid_create(&ctrldata_motor, &LDR_USE, &PWM_motor, &setpoint_motor,
+    kp_motor, ki_motor, kd_motor);
+  pid_limits(pid_motor, -255, 255);
+  pid_auto(pid_motor);
 
+  pid_led = pid_create(&ctrldata_led, &LDR_USE, &PWM_led, &setpoint_led,
+    kp_led, ki_led, kd_led);
+  pid_limits(pid_led, 0, 255);
+  pid_auto(pid_led);
+
+  /**************************************************************************/
+  /*******************Inicializacion de los timers de los PWM****************/
+  /**************************************************************************/
+  HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
+  HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_2);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -151,6 +201,8 @@ int main(void)
       LDR2 = HAL_ADC_GetValue(&hadc1);
     }
     HAL_ADC_Stop(&hadc1);
+
+    LDR_USE = LDR1 - LDR2;
     /************************************************************************/
     /******CODIGO DE PRUEBA PARA EL USO DE LAS LECTURAS DE LOS SENSORAS******/
     /******Y PARA COMPROBAR LA CORRECTA GESTION DE LAS INTERRUPCIONES********/
@@ -173,10 +225,60 @@ int main(void)
         HAL_GPIO_WritePin(GPIOD, GPIO_PIN_13|GPIO_PIN_14|GPIO_PIN_12, 0);
         break;
     }
+    /************************************************************************/
+    /*******GESTION DE LOS PID PARA EL USO DEL MOTOR ASI COMO DE LOS LED*****/
+    /************************************************************************/
 
-    HAL_Delay(200);
+    /*******Se pretende priorizar el uso de la persiana ante el uso de los***/
+    /*******LED; excepto en el caso en el que no haya suficiente luz en el***/
+    /*******exterior, donde la persiana se bajará completamente**************/
+    if(PWM_motor >= 0){
+      //Activa el controlador para que vaya en un sentido
+    }
+
+    else if (PWM_motor <= 0){
+      //Activa el controlador para que vaya en el otro sentido
+    }
+
+    if (LDR2 < LUX_LOW_LIMIT){
+      //El PWM_motor se fija en una velocidad constante para cerrar y el led
+      //sigue igual
+      if(pid_need_compute(pid_led)){
+        pid_compute(pid_led);
+      }
+      PWM_motor = -50;
+    }
+
+    else if (LDR2 >= LUX_LOW_LIMIT && FDC_TOP == 0){
+      //Prioriza la persiana sobre el LED
+      PWM_led = 0;
+      if(pid_need_compute(pid_motor)){
+        pid_compute(pid_motor);
+      }
+    }
+
+    else if (LDR2 >= LUX_LOW_LIMIT && FDC_TOP == 1){
+      //Uso del LED puesto que persiana está totalmente subida
+      if (LDR_USE < 0){
+        //Hay más luz fuera
+        if(pid_need_compute(pid_led)){
+          pid_compute(pid_led);
+        }
+        PWM_motor = 0;
+      }
+      else if (LDR_USE >= 0 && PWM_led == 0){
+        PWM_led = 0;
+        if(pid_need_compute(pid_motor)){
+          pid_compute(pid_motor);
+        }
+      }
+    }
+    /**********************************************************************/
+    /*************USO DE LOS PWM CON LOS VALORES CALCULADOS****************/
+    /**********************************************************************/
+    htim1.Instance->CCR1 = PWM_led;
+    htim1.Instance->CCR2 = PWM_motor;
   /* USER CODE END 3 */
-  }
 }
 
 /**
@@ -276,6 +378,85 @@ static void MX_ADC1_Init(void)
 }
 
 /**
+  * @brief TIM1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM1_Init(void)
+{
+
+  /* USER CODE BEGIN TIM1_Init 0 */
+
+  /* USER CODE END TIM1_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+  TIM_OC_InitTypeDef sConfigOC = {0};
+  TIM_BreakDeadTimeConfigTypeDef sBreakDeadTimeConfig = {0};
+
+  /* USER CODE BEGIN TIM1_Init 1 */
+
+  /* USER CODE END TIM1_Init 1 */
+  htim1.Instance = TIM1;
+  htim1.Init.Prescaler = 16;
+  htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim1.Init.Period = 255;
+  htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim1.Init.RepetitionCounter = 0;
+  if (HAL_TIM_Base_Init(&htim1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim1, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_TIM_PWM_Init(&htim1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim1, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sConfigOC.OCMode = TIM_OCMODE_PWM1;
+  sConfigOC.Pulse = 0;
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+  sConfigOC.OCNPolarity = TIM_OCNPOLARITY_HIGH;
+  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+  sConfigOC.OCIdleState = TIM_OCIDLESTATE_RESET;
+  sConfigOC.OCNIdleState = TIM_OCNIDLESTATE_RESET;
+  if (HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sConfigOC.Pulse = 120;
+  if (HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sBreakDeadTimeConfig.OffStateRunMode = TIM_OSSR_DISABLE;
+  sBreakDeadTimeConfig.OffStateIDLEMode = TIM_OSSI_DISABLE;
+  sBreakDeadTimeConfig.LockLevel = TIM_LOCKLEVEL_OFF;
+  sBreakDeadTimeConfig.DeadTime = 0;
+  sBreakDeadTimeConfig.BreakState = TIM_BREAK_DISABLE;
+  sBreakDeadTimeConfig.BreakPolarity = TIM_BREAKPOLARITY_HIGH;
+  sBreakDeadTimeConfig.AutomaticOutput = TIM_AUTOMATICOUTPUT_DISABLE;
+  if (HAL_TIMEx_ConfigBreakDeadTime(&htim1, &sBreakDeadTimeConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM1_Init 2 */
+
+  /* USER CODE END TIM1_Init 2 */
+  HAL_TIM_MspPostInit(&htim1);
+
+}
+
+/**
   * Enable DMA controller clock
   */
 static void MX_DMA_Init(void)
@@ -307,9 +488,11 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12|GPIO_PIN_13|GPIO_PIN_14|GPIO_PIN_15, GPIO_PIN_RESET);
 
-  /*Configure GPIO pins : PA1 PA2 PA3 */
-  GPIO_InitStruct.Pin = GPIO_PIN_1|GPIO_PIN_2|GPIO_PIN_3;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  /*Configure GPIO pins : PA0 PA1 PA2 PA3
+                           PA4 */
+  GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_2|GPIO_PIN_3
+                          |GPIO_PIN_4;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
