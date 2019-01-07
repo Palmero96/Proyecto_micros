@@ -43,7 +43,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "STM_MY_LCD16X2.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -199,6 +199,30 @@ int main(void)
   /**************************************************************************/
   HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
   HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_2);
+  /**************************************************************************/
+  /*******************Inicialización de la pantalla LCD 16x2*****************/
+  /**************************************************************************/
+  LCD1602_Begin8BIT(RS_GPIO_Port, RS_Pin, EN_Pin, D0_GPIO_Port, D0_Pin, D1_Pin,
+    D2_Pin, D3_Pin, D4_GPIO_Port, D4_Pin, D5_Pin, D6_Pin, D7_Pin);
+  LCD1602_noCursor();
+  LCD1602_noBlink();
+  /***************************************************************************/
+  /************Mensaje inicial lanzado al usuario antes del bucle*************/
+  /***************************************************************************/
+  LCD1602_print("Welcome. Domotic");
+  LCD1602_2ndLine();
+  LCD1602_print("system by:");
+  HAL_Delay(1000);
+  LCD1602_clear();
+  LCD1602_1stLine();
+  LCD1602_print("Alvaro P.M.");
+  LCD1602_2ndLine();
+  LCD1602_print("Emilio M.R");
+  HAL_Delay(1000);
+  LCD1602_clear();
+  LCD1602_1stLine();
+  LCD1602_print("Emilio P.B.");
+  HAL_Delay(1000);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -296,9 +320,22 @@ int main(void)
     /**********************************************************************/
     htim1.Instance->CCR1 = PWM_led;
     htim1.Instance->CCR2 = PWM_motor;
+    /***********************************************************************/
+    /*******USO DE LA PANTALLA LCD 16x2 PARA MOSTRAR LA LUMINOSIDAD*********/
+    /***********************************************************************/
+    LCD1602_clear();
+    LCD1602_1stLine();
+    LCD1602_print("Rea.  Val.  Ref.");
+    LCD1602_setCursor(2,1);
+    LCD1602_PrintInt(LDR1);
+    LCD1602_setCursor(2,7);
+    LCD1602_PrintInt(REF_VAL_TEMP);
+    LCD1602_setCursor(2,13);
+    LCD1602_PrintInt(REF_VAL_DEF);
+	}
   /* USER CODE END 3 */
 }
-	}
+
 
 /**
   * @brief System Clock Configuration
@@ -502,10 +539,19 @@ static void MX_GPIO_Init(void)
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
+  __HAL_RCC_GPIOB_CLK_ENABLE();
   __HAL_RCC_GPIOD_CLK_ENABLE();
+  __HAL_RCC_GPIOE_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12|GPIO_PIN_13|GPIO_PIN_14|GPIO_PIN_15, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOB, D0_Pin|D1_Pin|D2_Pin|D3_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOD, D4_Pin|D5_Pin|D6_Pin|D7_Pin
+                          |GPIO_PIN_12|GPIO_PIN_13|GPIO_PIN_14|GPIO_PIN_15, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOE, EN_Pin|RS_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pins : PA0 PA1 PA2 PA3
                            PA4 */
@@ -515,12 +561,28 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : PD12 PD13 PD14 PD15 */
-  GPIO_InitStruct.Pin = GPIO_PIN_12|GPIO_PIN_13|GPIO_PIN_14|GPIO_PIN_15;
+  /*Configure GPIO pins : D0_Pin D1_Pin D2_Pin D3_Pin */
+  GPIO_InitStruct.Pin = D0_Pin|D1_Pin|D2_Pin|D3_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : D4_Pin D5_Pin D6_Pin D7_Pin
+                           PD12 PD13 PD14 PD15 */
+  GPIO_InitStruct.Pin = D4_Pin|D5_Pin|D6_Pin|D7_Pin
+                          |GPIO_PIN_12|GPIO_PIN_13|GPIO_PIN_14|GPIO_PIN_15;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : EN_Pin RS_Pin */
+  GPIO_InitStruct.Pin = EN_Pin|RS_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
 
   /* EXTI interrupt init*/
   HAL_NVIC_SetPriority(EXTI1_IRQn, 0, 0);
