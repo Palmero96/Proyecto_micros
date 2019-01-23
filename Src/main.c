@@ -43,7 +43,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "STM_MY_LCD16X2.h"
+#include "lcd.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -87,6 +87,8 @@ int FDC_TOP, FDC_BOT;
 
 float error_signal;
 
+int flag_less = 0, flag_more = 0, flag_fix = 0;
+
 //***********************Valores de las salidas de los PWM********************/
 int PWM_motor;
 int PWM_led;
@@ -110,21 +112,22 @@ static void MX_TIM1_Init(void);
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
   /***********************INTERRUPCIONES BOTONERA****************************/
   if (GPIO_Pin == GPIO_PIN_0){
-    REF_VAL_DEF = REF_VAL_TEMP;
+		if (flag_fix == 0) flag_fix = 1;
+  }
+	else if (GPIO_Pin == GPIO_PIN_2){
+		if (flag_more == 0) flag_more = 1;
   }
   else if (GPIO_Pin == GPIO_PIN_1){
-    REF_VAL_TEMP--;
+		if (flag_less == 0) flag_less = 1;
   }
-  else if (GPIO_Pin == GPIO_PIN_2){
-    REF_VAL_TEMP++;
-  }
+  
   /******************INTERRUPCIONES FINALES DE CARRERA***********************/
-  else if (GPIO_Pin == GPIO_PIN_3){
+  /*else if (GPIO_Pin == GPIO_PIN_3){
     FDC_TOP = 1;
   }
   else if (GPIO_Pin == GPIO_PIN_4){
     FDC_BOT = 1;
-  }
+  }*/
 }
 
 /****************************************************************************/
@@ -137,6 +140,17 @@ void pid_compute(struct PID* mypid, float error){
     mypid->error)/2 + mypid->Kd*(mypid->error-mypid->error_prev);
   if (mypid->OUTPUT > mypid->high_limit) mypid->OUTPUT = mypid->high_limit;
   if (mypid->OUTPUT < mypid->low_limit) mypid->OUTPUT = mypid->low_limit;
+}
+
+/*****************************************************************************/
+/***************FUNCION PARA HACER UN CLEAR DE LA PANTALLA********************/
+/*****************************************************************************/
+void Lcd_clear(Lcd_HandleTypeDef* lcd){
+	Lcd_cursor(lcd, 0, 0);
+	Lcd_string(lcd, "                ");
+	Lcd_cursor(lcd, 1, 0);
+	Lcd_string(lcd, "                ");
+	Lcd_cursor(lcd, 0, 0);
 }
 /* USER CODE END 0 */
 
@@ -202,27 +216,30 @@ int main(void)
   /**************************************************************************/
   /*******************Inicialización de la pantalla LCD 16x2*****************/
   /**************************************************************************/
-  LCD1602_Begin8BIT(RS_GPIO_Port, RS_Pin, EN_Pin, D0_GPIO_Port, D0_Pin, D1_Pin,
-    D2_Pin, D3_Pin, D4_GPIO_Port, D4_Pin, D5_Pin, D6_Pin, D7_Pin);
-  LCD1602_noCursor();
-  LCD1602_noBlink();
+  Lcd_PortType ports[] = {D0_GPIO_Port, D1_GPIO_Port, D2_GPIO_Port, D3_GPIO_Port,
+		D4_GPIO_Port, D5_GPIO_Port, D6_GPIO_Port, D7_GPIO_Port};
+
+	Lcd_PinType pins[] = {D0_Pin, D1_Pin, D2_Pin, D3_Pin, D4_Pin, D5_Pin, D6_Pin, D7_Pin};
+
+	Lcd_HandleTypeDef lcd;
+	
+	lcd = Lcd_create(ports, pins, RS_GPIO_Port, RS_Pin, EN_GPIO_Port, EN_Pin, LCD_8_BIT_MODE);
   /***************************************************************************/
   /************Mensaje inicial lanzado al usuario antes del bucle*************/
   /***************************************************************************/
-  LCD1602_print("Welcome. Domotic");
-  LCD1602_2ndLine();
-  LCD1602_print("system by:");
-  HAL_Delay(1000);
-  LCD1602_clear();
-  LCD1602_1stLine();
-  LCD1602_print("Alvaro P.M.");
-  LCD1602_2ndLine();
-  LCD1602_print("Emilio M.R");
-  HAL_Delay(1000);
-  LCD1602_clear();
-  LCD1602_1stLine();
-  LCD1602_print("Emilio P.B.");
-  HAL_Delay(1000);
+  Lcd_string(&lcd, "Welcome. Domotic");
+  Lcd_cursor(&lcd, 1, 0);
+	Lcd_string(&lcd, "system by: ");
+  HAL_Delay(1500);
+  Lcd_clear(&lcd);
+	Lcd_string(&lcd, "Alvaro P. M.");
+	Lcd_cursor(&lcd, 1, 0);
+	Lcd_string(&lcd, "Emilio M.R.");
+	HAL_Delay(1500);
+  Lcd_clear(&lcd);
+  Lcd_string(&lcd, "Emilio P.B.");
+  HAL_Delay(1500);
+	Lcd_clear(&lcd);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -232,6 +249,24 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+		//**********************************************************************
+		//********GESTION DE LAS BANDERAS GENERADAS POR EL GESTOR DE ***********
+		//**************************INTERRUPCIONES******************************
+		//**********************************************************************
+		if (flag_less == 1){
+			REF_VAL_TEMP--;
+			flag_less = 0;
+		}
+		
+		if (flag_more == 1){
+			REF_VAL_TEMP++;
+			flag_more = 0;
+		}
+		
+		if (flag_fix == 1){
+			REF_VAL_DEF = REF_VAL_TEMP;
+			flag_fix = 0;
+		}
     //**********************************************************************
     //************lectura de los valores analógicos de los sensores*********
     //**********************************************************************
@@ -323,19 +358,16 @@ int main(void)
     /***********************************************************************/
     /*******USO DE LA PANTALLA LCD 16x2 PARA MOSTRAR LA LUMINOSIDAD*********/
     /***********************************************************************/
-    LCD1602_clear();
-    LCD1602_1stLine();
-    LCD1602_print("Rea.  Val.  Ref.");
-    LCD1602_setCursor(2,1);
-    LCD1602_PrintInt(LDR1);
-    LCD1602_setCursor(2,7);
-    LCD1602_PrintInt(REF_VAL_TEMP);
-    LCD1602_setCursor(2,13);
-    LCD1602_PrintInt(REF_VAL_DEF);
+    Lcd_string(&lcd, "Rea.  Val.  Ref.");
+    Lcd_cursor(&lcd, 1, 0);
+		Lcd_int(&lcd, LDR1);
+		Lcd_cursor(&lcd, 1, 6);
+		Lcd_int(&lcd, REF_VAL_TEMP);
+		Lcd_cursor(&lcd, 1, 13);
+		Lcd_int(&lcd, REF_VAL_DEF);
 	}
   /* USER CODE END 3 */
 }
-
 
 /**
   * @brief System Clock Configuration
@@ -346,30 +378,35 @@ void SystemClock_Config(void)
   RCC_OscInitTypeDef RCC_OscInitStruct = {0};
   RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
 
-  /**Configure the main internal regulator output voltage
+  /**Configure the main internal regulator output voltage 
   */
   __HAL_RCC_PWR_CLK_ENABLE();
   __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
-  /**Initializes the CPU, AHB and APB busses clocks
+  /**Initializes the CPU, AHB and APB busses clocks 
   */
   RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
   RCC_OscInitStruct.HSIState = RCC_HSI_ON;
   RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
-  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_NONE;
+  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
+  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
+  RCC_OscInitStruct.PLL.PLLM = 8;
+  RCC_OscInitStruct.PLL.PLLN = 96;
+  RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
+  RCC_OscInitStruct.PLL.PLLQ = 4;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
     Error_Handler();
   }
-  /**Initializes the CPU, AHB and APB busses clocks
+  /**Initializes the CPU, AHB and APB busses clocks 
   */
   RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
                               |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
-  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_HSI;
+  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
-  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
+  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_0) != HAL_OK)
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_3) != HAL_OK)
   {
     Error_Handler();
   }
@@ -392,7 +429,7 @@ static void MX_ADC1_Init(void)
   /* USER CODE BEGIN ADC1_Init 1 */
 
   /* USER CODE END ADC1_Init 1 */
-  /**Configure the global features of the ADC (Clock, Resolution, Data Alignment and number of conversion)
+  /**Configure the global features of the ADC (Clock, Resolution, Data Alignment and number of conversion) 
   */
   hadc1.Instance = ADC1;
   hadc1.Init.ClockPrescaler = ADC_CLOCK_SYNC_PCLK_DIV8;
@@ -410,7 +447,7 @@ static void MX_ADC1_Init(void)
   {
     Error_Handler();
   }
-  /**Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
+  /**Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time. 
   */
   sConfig.Channel = ADC_CHANNEL_10;
   sConfig.Rank = 1;
@@ -419,7 +456,7 @@ static void MX_ADC1_Init(void)
   {
     Error_Handler();
   }
-  /**Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
+  /**Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time. 
   */
   sConfig.Channel = ADC_CHANNEL_11;
   sConfig.Rank = 2;
@@ -512,10 +549,10 @@ static void MX_TIM1_Init(void)
 
 }
 
-/**
+/** 
   * Enable DMA controller clock
   */
-static void MX_DMA_Init(void)
+static void MX_DMA_Init(void) 
 {
   /* DMA controller clock enable */
   __HAL_RCC_DMA2_CLK_ENABLE();
@@ -539,60 +576,43 @@ static void MX_GPIO_Init(void)
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
-  __HAL_RCC_GPIOB_CLK_ENABLE();
   __HAL_RCC_GPIOD_CLK_ENABLE();
-  __HAL_RCC_GPIOE_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, D0_Pin|D1_Pin|D2_Pin|D3_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12|GPIO_PIN_13|GPIO_PIN_14|GPIO_PIN_15 
+                          |D4_Pin|D5_Pin|D6_Pin|D7_Pin 
+                          |D0_Pin|D1_Pin|D2_Pin|D3_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOD, D4_Pin|D5_Pin|D6_Pin|D7_Pin
-                          |GPIO_PIN_12|GPIO_PIN_13|GPIO_PIN_14|GPIO_PIN_15, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOC, RS_Pin|EN_Pin, GPIO_PIN_RESET);
 
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOE, EN_Pin|RS_Pin, GPIO_PIN_RESET);
-
-  /*Configure GPIO pins : PA0 PA1 PA2 PA3
-                           PA4 */
-  GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_2|GPIO_PIN_3
-                          |GPIO_PIN_4;
+  /*Configure GPIO pins : PA0 PA1 PA2 */
+  GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_2;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : D0_Pin D1_Pin D2_Pin D3_Pin */
-  GPIO_InitStruct.Pin = D0_Pin|D1_Pin|D2_Pin|D3_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
-
-  /*Configure GPIO pins : D4_Pin D5_Pin D6_Pin D7_Pin
-                           PD12 PD13 PD14 PD15 */
-  GPIO_InitStruct.Pin = D4_Pin|D5_Pin|D6_Pin|D7_Pin
-                          |GPIO_PIN_12|GPIO_PIN_13|GPIO_PIN_14|GPIO_PIN_15;
+  /*Configure GPIO pins : PD12 PD13 PD14 PD15 
+                           D4_Pin D5_Pin D6_Pin D7_Pin 
+                           D0_Pin D1_Pin D2_Pin D3_Pin */
+  GPIO_InitStruct.Pin = GPIO_PIN_12|GPIO_PIN_13|GPIO_PIN_14|GPIO_PIN_15 
+                          |D4_Pin|D5_Pin|D6_Pin|D7_Pin 
+                          |D0_Pin|D1_Pin|D2_Pin|D3_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : EN_Pin RS_Pin */
-  GPIO_InitStruct.Pin = EN_Pin|RS_Pin;
+  /*Configure GPIO pins : RS_Pin EN_Pin */
+  GPIO_InitStruct.Pin = RS_Pin|EN_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
+  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
   /* EXTI interrupt init*/
   HAL_NVIC_SetPriority(EXTI1_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(EXTI1_IRQn);
-
-  HAL_NVIC_SetPriority(EXTI2_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(EXTI2_IRQn);
-
-  HAL_NVIC_SetPriority(EXTI3_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(EXTI3_IRQn);
 
 }
 
@@ -621,7 +641,7 @@ void Error_Handler(void)
   * @retval None
   */
 void assert_failed(uint8_t *file, uint32_t line)
-{
+{ 
   /* USER CODE BEGIN 6 */
   /* User can add his own implementation to report the file name and line number,
      tex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
